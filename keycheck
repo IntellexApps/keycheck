@@ -1,0 +1,129 @@
+#!/bin/bash
+#
+# title             : keycheck
+# description       : Test an APK file against keystore.
+# author            : Intellex
+# date              : 20151302
+# version           : 0.1.0
+# usage             : keycheck <path_to_APK_file> <path_to_keystore>
+#===============================================================================
+
+
+# Definitions {
+
+	# Colors
+	YELLOW=$(tput setaf 3)
+	GREEN=$(tput setaf 2)
+	CLEAR=$(tput sgr0)
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+
+# Macros {
+
+	# Error handling
+	ERROR() {
+		printf "${YELLOW}$1${CLEAR}\n" >&2
+		exit 2
+	}
+
+	# Input error
+	ISSUE() {
+		printf "\n$1\n\n" >&2
+		exit 1
+	}
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+
+# Help
+if [ -z "$1" ] || [ "$1" == "--help" ]; then
+	printf "\nUsage:\nkeycheck APK keystore\n\n"
+	exit 0;
+fi
+
+# Get args {
+
+	# APK file
+	APK=$1
+	if [ -z "$APK" ] || [ ! -f $APK ]; then
+		ISSUE "Please suppy a valid APK file"
+	fi
+
+	# Keystore file
+	KEY=$2
+	if [ -z "$KEY" ] || [ ! -f $KEY ]; then
+		ISSUE "Please suppy a valid keystore"
+	fi
+
+# }
+
+# Read {
+
+	# Passphrase
+	printf "Keystore passphrase: ";
+	read PASSPHRASE
+	if [ -z "$PASSPHRASE" ]; then
+		ISSUE "Please suppy a passphrase for keystore"
+	fi
+
+	# Alias
+	printf "Alias: "
+	read ALIAS
+	if [ -z "$ALIAS" ]; then
+		ISSUE "Please suppy an alias for keystore"
+	fi
+
+	# Alias password
+	printf "Alias password (leave empty if same as passphrase): "
+	read PASSWORD
+	if [ -z "$PASSWORD" ]; then
+		echo "Using passhphrase for alias password"
+		PASSWORD=PASSPHRASE;
+	fi
+
+# }
+
+
+# Get the signature of the certificate in APK {
+
+	# Get the keystore from APK
+	CERT=`keytool -printcert -jarfile $APK`
+	if [ ! $? -eq 0 ]; then
+		ERROR "Could not get certificate from \"$APK\""
+	fi
+
+	# Get the signature
+	SHA1=`echo $CERT | egrep " ([A-Z0-9][A-Z0-9]:){19}[A-Z0-9][A-Z0-9] " -o`;
+	if [ $? -gt 0 ] || [ -z "$SHA1" ]; then
+		ERROR "Unable to extract signature of the certificate from the \"$APK\""
+	fi
+
+# }
+
+# Get the signature of the keystore {
+
+	# Get the result
+	RESULT=`keytool -list -keystore $KEY -alias $ALIAS -storepass $PASSPHRASE`
+	if [ $? -gt 0 ]; then
+		if [[ "$RESULT" == *exist* ]]; then
+			ERROR "Unexisting alias"
+		fi
+		ERROR "Could not unlock the supplied keystore, check you passphrase"
+	fi
+
+	# Test alias password
+	printf "${PASSPHRASE}\n${PASSWORD}\n${PASSWORD}\n${PASSWORD}" | keytool -keypasswd -keystore $KEY -alias $ALIAS >/dev/null 2>/dev/null
+	if [ ! $? -eq 0 ]; then ERROR "Bad alias password"; fi
+
+# }
+
+# Compare the result
+RES=`echo $RESULT | egrep " ([A-Z0-9][A-Z0-9]:){19}[A-Z0-9][A-Z0-9]" -o`
+if [ "$RES " != "$SHA1" ]; then
+	ERROR "Supplied APK has not been signed with supplikeyed keystore"
+fi
+
+echo "${GREEN}Validation passed${CLEAR}"
+echo "SHA1: ${SHA1}"
+exit 0;
